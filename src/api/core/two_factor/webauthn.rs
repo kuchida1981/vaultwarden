@@ -377,8 +377,8 @@ pub async fn get_webauthn_registrations(
 
 pub async fn generate_webauthn_login(user_id: &UserId, conn: &DbConn) -> JsonResult {
     // Load saved credentials
-    let creds: Vec<Passkey> =
-        get_webauthn_registrations(user_id, conn).await?.1.into_iter().map(|r| r.credential).collect();
+    let registrations = get_webauthn_registrations(user_id, conn).await?.1;
+    let creds: Vec<Passkey> = registrations.iter().map(|r| r.credential.clone()).collect();
 
     if creds.is_empty() {
         err!("No Webauthn devices registered")
@@ -391,20 +391,28 @@ pub async fn generate_webauthn_login(user_id: &UserId, conn: &DbConn) -> JsonRes
     let mut state = serde_json::to_value(&state)?;
     state["ast"]["policy"] = Value::String("discouraged".to_owned());
 
-    // Add appid, this is only needed for U2F compatibility, so maybe it can be removed as well
-    let app_id = format!("{}/app-id.json", CONFIG.domain());
-    state["ast"]["appid"] = Value::String(app_id.clone());
+    // Only add the appid extension (needed for U2F compatibility) when at least one
+    // of the registered credentials was actually migrated from the old U2F flow.
+    // Sending it unconditionally for natively-registered FIDO2 credentials has been
+    // observed to make some authenticators (e.g. certain Google Titan Security Keys)
+    // fail the assertion outright in some browser/OS combinations, seemingly by
+    // pushing the browser onto a CTAP1/U2F-polling code path instead of CTAP2.
+    if registrations.iter().any(|r| r.migrated) {
+        let app_id = format!("{}/app-id.json", CONFIG.domain());
+        state["ast"]["appid"] = Value::String(app_id.clone());
+
+        response
+            .public_key
+            .extensions
+            .get_or_insert(RequestAuthenticationExtensions {
+                appid: None,
+                uvm: None,
+                hmac_get_secret: None,
+            })
+            .appid = Some(app_id);
+    }
 
     response.public_key.user_verification = UserVerificationPolicy::Discouraged_DO_NOT_USE;
-    response
-        .public_key
-        .extensions
-        .get_or_insert(RequestAuthenticationExtensions {
-            appid: None,
-            uvm: None,
-            hmac_get_secret: None,
-        })
-        .appid = Some(app_id);
 
     // Save the challenge state for later validation
     TwoFactor::new(user_id.clone(), TwoFactorType::WebauthnLoginChallenge, serde_json::to_string(&state)?)
