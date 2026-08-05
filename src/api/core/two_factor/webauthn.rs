@@ -150,7 +150,7 @@ async fn generate_webauthn_challenge(data: Json<PasswordOrOtpData>, headers: Hea
     )?;
 
     let mut state = serde_json::to_value(&state)?;
-    state["rs"]["policy"] = Value::String("discouraged".to_owned());
+    state["rs"]["policy"] = Value::String("preferred".to_owned());
     state["rs"]["extensions"].as_object_mut().unwrap().clear();
 
     let type_ = TwoFactorType::WebauthnRegisterChallenge;
@@ -160,7 +160,7 @@ async fn generate_webauthn_challenge(data: Json<PasswordOrOtpData>, headers: Hea
     // we need to modify some of the default settings defined by `start_passkey_registration()`.
     challenge.public_key.extensions = None;
     if let Some(asc) = challenge.public_key.authenticator_selection.as_mut() {
-        asc.user_verification = UserVerificationPolicy::Discouraged_DO_NOT_USE;
+        asc.user_verification = UserVerificationPolicy::Preferred;
     }
 
     let mut challenge_value = serde_json::to_value(challenge.public_key)?;
