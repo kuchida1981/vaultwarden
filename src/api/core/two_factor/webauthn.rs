@@ -150,7 +150,7 @@ async fn generate_webauthn_challenge(data: Json<PasswordOrOtpData>, headers: Hea
     )?;
 
     let mut state = serde_json::to_value(&state)?;
-    state["rs"]["policy"] = Value::String("discouraged".to_owned());
+    state["rs"]["policy"] = Value::String("preferred".to_owned());
     state["rs"]["extensions"].as_object_mut().unwrap().clear();
 
     let type_ = TwoFactorType::WebauthnRegisterChallenge;
@@ -160,7 +160,7 @@ async fn generate_webauthn_challenge(data: Json<PasswordOrOtpData>, headers: Hea
     // we need to modify some of the default settings defined by `start_passkey_registration()`.
     challenge.public_key.extensions = None;
     if let Some(asc) = challenge.public_key.authenticator_selection.as_mut() {
-        asc.user_verification = UserVerificationPolicy::Discouraged_DO_NOT_USE;
+        asc.user_verification = UserVerificationPolicy::Preferred;
     }
 
     let mut challenge_value = serde_json::to_value(challenge.public_key)?;
@@ -387,15 +387,19 @@ pub async fn generate_webauthn_login(user_id: &UserId, conn: &DbConn) -> JsonRes
     // Generate a challenge based on the credentials
     let (mut response, state) = WEBAUTHN.start_passkey_authentication(&creds)?;
 
-    // Modify to discourage user verification
+    // Modify user verification policy.
+    // Must match the `Preferred` policy used at registration: webauthn-rs enforces UV at
+    // authentication when the credential was verified at registration under a `Preferred`
+    // policy (see `registration_policy` handling in webauthn-rs-core), so asking for anything
+    // weaker here would make already-verified credentials fail to authenticate.
     let mut state = serde_json::to_value(&state)?;
-    state["ast"]["policy"] = Value::String("discouraged".to_owned());
+    state["ast"]["policy"] = Value::String("preferred".to_owned());
 
     // Add appid, this is only needed for U2F compatibility, so maybe it can be removed as well
     let app_id = format!("{}/app-id.json", CONFIG.domain());
     state["ast"]["appid"] = Value::String(app_id.clone());
 
-    response.public_key.user_verification = UserVerificationPolicy::Discouraged_DO_NOT_USE;
+    response.public_key.user_verification = UserVerificationPolicy::Preferred;
     response
         .public_key
         .extensions
